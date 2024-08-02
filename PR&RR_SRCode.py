@@ -1,5 +1,5 @@
 '''
-18/06/2024
+02/08/2024
 This Code was written by Rawan S. Abdulsadig (https://github.com/RawanAbdulsadig), corresponding to the work presented in the paper: 'A Novel Computational Signal Processing Framework Towards Multimodal Vital Signs Extraction Using Neck-Worn Wearable Devices'
 Please cite the paper if you found any of the code below useful, thanks.
 '''
@@ -9,12 +9,64 @@ import pandas as pd
 import scipy
 
 def Standardise(sig):
+    '''
+    Standardizing input signal "sig" to have 0 mean and 1 standard deviation
+
+    Parameters
+    ----------
+    sig : numpy.ndarray
+        The signal to be standardized
+
+    Returns
+    -------
+    The standardized signal
+    '''
     return (sig - np.mean(sig))/np.std(sig)
 
-def Normalise(sig):
-    return (sig - np.min(sig))/(np.max(sig) - np.min(sig))
+def Normalise(array):
+    '''
+    Normalizing input array to have range between 0 and 1
 
-def getDominanceScores(segment, DS_df, thresh, level, low_fftfreq, high_fftfreq):
+    Parameters
+    ----------
+    array : numpy.ndarray
+        The array to be normalized
+
+    Returns
+    -------
+    The normalized array
+    '''
+    return (array - np.min(array))/(np.max(array) - np.min(array))
+
+def getDominanceScores(segment, DS_df, thresh, low_fftfreq, high_fftfreq, level=1):
+    '''
+    The recursive computation of dominance scores given a processed window segment.
+
+    Parameters
+    ----------
+    segment : numpy.ndarray
+        The processed window segment
+
+    DS_df : pandas.DataFrame
+        Empty dataframe which will be filled with the dominance scores
+
+    thresh : float
+        Float number between 0 and 1
+
+    low_fftfreq : int
+        The lower bound of the frequency range
+
+    high_fftfreq : int
+        The upper bound of the frequency range
+
+    level : int
+        The level of recursion, default = 1
+
+    Returns
+    -------
+    DS_df : pandas.DataFrame
+        Filled dataframe of rates and their corresponding dominance scores.
+    '''
 
     Obs_Rates, Prob_Est = getProbaEstimations(segment, low_fftfreq, high_fftfreq)
     rate_estimations_DF = pd.DataFrame({'Rate':np.around(Obs_Rates[Prob_Est >= thresh]),
@@ -22,7 +74,6 @@ def getDominanceScores(segment, DS_df, thresh, level, low_fftfreq, high_fftfreq)
     DS_df = pd.concat([DS_df, rate_estimations_DF], axis=0, ignore_index=True)
 
     sub_segments, noisy = get_cleanChuncks(segment, gab = 1, min_chunckLen = 5*100)
-#     print(sub_segments)
     if (len(sub_segments) > 0) & noisy:
         for sub_segment in sub_segments:
 
@@ -32,6 +83,25 @@ def getDominanceScores(segment, DS_df, thresh, level, low_fftfreq, high_fftfreq)
     return DS_df
 
 def applyDoublePeakAdjustment(df, last_confRate, slack):
+    '''
+    The recursive computation of dominance scores.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        A dataframe of dominance scores which will be adjusted if conditions were met
+
+    last_confRate : int
+        The rate (center of the rate band) corresponding to the last confidance estimation
+
+    slack : int
+        Corresponding to the error allowance range
+
+    Returns
+    -------
+    df : pandas.DataFrame
+        Adjusted dominance scores dataframe
+    '''
     try:
         if np.percentile(df.Rate , 75) > np.percentile(df.Rate , 50)*2 - slack*3:
             df.loc[df.Rate >= np.percentile(df.Rate , 75),'Rate'] = df[df.Rate >= np.percentile(df.Rate , 75)].Rate/2
@@ -44,6 +114,28 @@ def applyDoublePeakAdjustment(df, last_confRate, slack):
     return df
 
 def getProbaEstimations(segment, low_fftfreq, high_fftfreq):
+    '''
+    The recursive computation of dominance scores.
+
+    Parameters
+    ----------
+    segment : numpy.ndarray
+        The processed window segment
+
+    low_fftfreq : int
+        The lower bound of the frequency range
+
+    high_fftfreq : int
+        The upper bound of the frequency range
+
+    Returns
+    -------
+    pfft_freqs*60 : numpy.ndarray
+        An array of frequence components converted to rates per minutes
+
+    pfft_probs : numpy.ndarray
+        An array of frequence probabilities accociated with the frequency components (rates)
+    '''
     fft_f = np.fft.fftfreq(segment.shape[0], d=1/100)
     pfft_freqs = fft_f[(fft_f>low_fftfreq) & (fft_f<=high_fftfreq)]
 
@@ -58,10 +150,32 @@ def getProbaEstimations(segment, low_fftfreq, high_fftfreq):
 
     return pfft_freqs*60, pfft_probs
 
-def get_cleanChuncks(r_val, gab = 1, min_chunckLen = 5*100):
-    outlier_reigons = (r_val>3) | (r_val < -3)*1
-    Acceptable_reigons = (r_val<=3) & (r_val >= -3)*1
-    indexes = np.arange(len(r_val))
+def get_cleanChuncks(segment, gab = 1, min_chunckLen = 5*100):
+    '''
+    The function is responsible for the guided disection of the processed segment into sub-segments
+
+    Parameters
+    ----------
+    segment : numpy.ndarray
+        The processed window segment
+
+    gab : int
+        A space to spare between the edges of the sub-segments and the deviation part of the signal (to prevent it from leaking to the sub-segments)
+
+    min_chunckLen : int
+        Minimum length of the sub-segments
+
+    Returns
+    -------
+    segment_chuncks : list of numpy.ndarrays
+        A list of subsegments
+
+    noisy : boolean
+        An indicator of whether there was sudden deviations in the segment or not
+    '''
+    outlier_reigons = (segment>3) | (segment < -3)*1
+    Acceptable_reigons = (segment<=3) & (segment >= -3)*1
+    indexes = np.arange(len(segment))
     noisy = sum(outlier_reigons) != 0
     Cleaning_DataFrame = pd.DataFrame({'indexes': indexes, 'Acceptable_reigons': Acceptable_reigons})
     if Cleaning_DataFrame.Acceptable_reigons.values[0] == 1:
@@ -77,26 +191,101 @@ def get_cleanChuncks(r_val, gab = 1, min_chunckLen = 5*100):
     for st,en in zip(ChunckStartIndex, ChunckEndIndex):
         Chunck_StartEnd_Index.append((st,en))
 
-    r_val_chuncks = []
+    segment_chuncks = []
     for (chunck_start, chunck_end) in Chunck_StartEnd_Index:
         if chunck_start == 1:
-            if chunck_end >= len(r_val)-3:
-                 r_val_chunck = r_val[int(100*gab/2):-int(100*gab/2)]
+            if chunck_end >= len(segment)-3:
+                 segment_chunck = segment[int(100*gab/2):-int(100*gab/2)]
             else:
-                 r_val_chunck = r_val[int(100*gab/2):chunck_end-int(100*gab)]
+                 segment_chunck = segment[int(100*gab/2):chunck_end-int(100*gab)]
         else:
-            if chunck_end >= len(r_val)-3:
-                r_val_chunck = r_val[chunck_start+int(100*gab):]
+            if chunck_end >= len(segment)-3:
+                segment_chunck = segment[chunck_start+int(100*gab):]
             else:
-                r_val_chunck = r_val[chunck_start+int(100*gab):chunck_end-int(100*gab)]
+                segment_chunck = segment[chunck_start+int(100*gab):chunck_end-int(100*gab)]
 
-        if len(r_val_chunck) >= min_chunckLen:
-            r_val_chuncks.append(r_val_chunck)
+        if len(segment_chunck) >= min_chunckLen:
+            segment_chuncks.append(segment_chunck)
         else:
             noisy = True
-    return r_val_chuncks, noisy
+    return segment_chuncks, noisy
 
-def getRateEstimationBand(Processed_segments, EWMA, EWMA_Estimation, EWMA_ConfEstimation, lastConfRate, Rate_Range, slack, task, mu , std, low_fftfreq, high_fftfreq, alpha=0.3, thresh = 0.1, low_percentile=25, high_percentile=75):
+def getRateEstimationBand(Processed_segments, EWMA, EWMA_Estimation, EWMA_ConfEstimation, Absolute_Estimation, lastConfRate, Rate_Range, slack, task, mu , std, low_fftfreq, high_fftfreq, alpha=0.3, thresh = 0.1, low_percentile=25, high_percentile=75):
+    '''
+    The main rate estimation function which initiates calls to all the above functions (this function should be called within the loop traversing the signal)
+
+    Parameters
+    ----------
+    Processed_segments : numpy.ndarray
+        The processed window segment
+
+    EWMA : pandas.DataFrame
+        A dataframe holding the aggregated EWMA values associated to each rate
+
+    EWMA_Estimation : list
+        A list holding the estimats in the previous timesteps
+
+    EWMA_ConfEstimation : list
+        A list holding the estimats in the previous timesteps, with NaNs corresponding to inconfidant estimates
+
+    Absolute_Estimation : list
+        A list holding the rate-value estimats in the previous timesteps,  with NaNs corresponding to inconfidant estimates
+
+    last_confRate : int
+        The rate (center of the rate band) corresponding to the last confidance estimation
+
+    Rate_Range : list
+        All possible rates in the specified range
+
+    slack : int
+        Corresponding to the error allowance range
+
+    task : string
+        The rate estimation task: 'PR' or 'RR'
+
+    mu : int
+        The expected mean of the normal distribution of the possible rates
+
+    std: int
+        The expected standard deviation of the normal distribution of the possible rates
+
+    low_fftfreq : int
+        The lower bound of the frequency range
+
+    high_fftfreq : int
+        The upper bound of the frequency range
+
+    alpha : float
+        The EWMA smoohting parameter. Default = 0.3
+
+    thresh : float
+        Float number between 0 and 1. Default = 0.1
+
+    low_percentile : int
+        The lower percentile used to evaluate the confidance of the estimation. Default = 25
+
+    high_percentile : int
+        The higher percentile used to evaluate the confidance of the estimation. Default = 75
+
+
+    Returns
+    -------
+    EWMA_Estimation : list
+        Updated list holding the estimats in the previous timesteps
+
+    EWMA_ConfEstimation : list
+        Updated list holding the estimats in the previous timesteps, with NaNs corresponding to inconfidant estimates
+
+    Absolute_Estimation : list
+        Updated list holding the rate-value estimats in the previous timesteps,  with NaNs corresponding to inconfidant estimates
+
+    last_confRate : int
+        Updated rate (center of the rate band) corresponding to the last confidance estimation
+
+    EWMA : pandas.DataFrame
+        Updated dataframe holding the aggregated EWMA values associated to each rate
+    '''
+
     rl = np.floor(slack/2)
     ru = np.ceil(slack/2)
 
@@ -106,11 +295,16 @@ def getRateEstimationBand(Processed_segments, EWMA, EWMA_Estimation, EWMA_ConfEs
         DF_df_ = pd.DataFrame([])
         DF_df_ = getDominanceScores(Processed_segment, DF_df_, thresh, level, low_fftfreq, high_fftfreq)
         DF_df = pd.concat([DF_df, DF_df_], axis=0, ignore_index=True)
-#     print(DF_df)
+
     if task == 'PR':
         DF_df = applyDoublePeakAdjustment(DF_df, lastConfRate, slack)
 
     DF_df = DF_df.groupby(['Rate']).sum()
+
+    try:
+        Abs_Estimation = DF_df.idxmax(axis=0).p
+    except:
+        Abs_Estimation = np.nan
 
     DF_df['p_band'] = DF_df.p
     for r in list(DF_df.index):
@@ -146,6 +340,8 @@ def getRateEstimationBand(Processed_segments, EWMA, EWMA_Estimation, EWMA_ConfEs
     if confident:
         EWMA_ConfEstimation.append(EWMA_Estimation[-1])
         last_confRate = EWMA_Estimation[-1]
-    else: EWMA_ConfEstimation.append(np.nan)
+        if (Abs_Estimation <= (EWMA_Estimation[-1] + ru)) & (Abs_Estimation >= (EWMA_Estimation[-1] - rl)):
+            Absolute_Estimation.append(Abs_Estimation)
+    else: EWMA_ConfEstimation.append(np.nan); Absolute_Estimation.append(np.nan);
 
-    return EWMA_Estimation, EWMA_ConfEstimation, lastConfRate, EWMA
+    return EWMA_Estimation, EWMA_ConfEstimation, Absolute_Estimation, lastConfRate, EWMA
